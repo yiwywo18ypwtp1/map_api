@@ -1,10 +1,13 @@
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, ForeignKey
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, ForeignKey, Float
 from sqlalchemy.orm import declarative_base, sessionmaker
+from datetime import datetime
+from sqlalchemy import DateTime
 
-SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, echo=False
-)
+engine = create_engine("postgresql://postgres:postgres@localhost:5432/postgres")
+#SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
+#engine = create_engine(
+#    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}, echo=False
+#)
 
 Base = declarative_base()
 
@@ -13,7 +16,10 @@ class User(Base):
 
     id = Column(Integer, primary_key=True)
     username = Column(String, unique=True, nullable=False)
-    password = Column(String, nullable=False)  # Хешований пароль
+    email = Column(String, unique=True, nullable=False)
+    password = Column(String, nullable=False)
+    reset_token = Column(String, nullable=True)
+    reset_token_expiry = Column(DateTime, nullable=True)
 
 class Location(Base):
     __tablename__ = 'locations'
@@ -22,6 +28,8 @@ class Location(Base):
     about = Column(String(255), nullable=False)
     likes = Column(Integer, default=0)
     dislikes = Column(Integer, default=0)
+    rating = Column(Float, default=0)
+    comments = Column(Integer, default=0)
 
     def __str__(self):
         return f'{self.name}: "{self.about}"'
