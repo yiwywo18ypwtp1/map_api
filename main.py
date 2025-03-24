@@ -189,7 +189,7 @@ async def logout(response: Response):
 
 
 
-@app.get("/locations/all")
+@app.get("/locations")
 async def all_locations(
         db: Session = Depends(get_db)
 ):
@@ -227,7 +227,7 @@ async def all_locations(
 
 
 
-@app.post("/locations/new")
+@app.post("/locations")
 async def add_location(
     name: str,
     about: str,
@@ -387,7 +387,7 @@ def edit_location_about(
         return {"location edited": location}
 
 
-@app.delete("/locations/{location_name}")
+@app.delete("/locations")
 def delete_location(
         location_name: str,
 
