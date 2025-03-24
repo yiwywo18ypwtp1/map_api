@@ -165,35 +165,6 @@ async def logout(response: Response):
     return {"message": "logout success"}
 
 
-
-
-
-# @app.get("/all-locations")
-# async def all_locations(db: Session = Depends(get_db)):
-#     locations = db.query(
-#         Location.id,
-#         Location.name,
-#         case(
-#             (Location.comments > 0, Location.rating / Location.comments),
-#             else_=0
-#         ).label("rating"),
-#         Location.likes,
-#         Location.dislikes,
-#     ).all()
-#
-#     result = [
-#         {
-#             "id": loc.id,
-#             "name": loc.name,
-#             "rating": loc.rating,
-#             "likes": loc.likes,
-#             "dislikes": loc.dislikes,
-#         }
-#         for loc in locations
-#     ]
-#
-#     return {"locations": result}
-
 @app.get("/all-locations")
 async def all_locations(db: Session = Depends(get_db)):
     redis_key = "all_locations"
