@@ -1,7 +1,8 @@
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, ForeignKey, Float
+from sqlalchemy import create_engine, Column, String, Integer, Boolean, ForeignKey, Float, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime
 from sqlalchemy import DateTime
+from sqlalchemy.types import Text
 
 engine = create_engine("postgresql://postgres:postgres@localhost:5432/postgres")
 #SQLALCHEMY_DATABASE_URL = "sqlite:///./sql_app.db"
@@ -25,14 +26,14 @@ class Location(Base):
     __tablename__ = 'locations'
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False, unique=True)
-    about = Column(String(255), nullable=False)
+    about = Column(Text, nullable=False)
     likes = Column(Integer, default=0)
     dislikes = Column(Integer, default=0)
     rating = Column(Float, default=0)
     comments = Column(Integer, default=0)
 
     def __str__(self):
-        return f'{self.name}: "{self.about}"'
+        return f'{self.name}: "{self.about}, rating: {self.rating}"'
 
 class Comment(Base):
     __tablename__ = 'comments'

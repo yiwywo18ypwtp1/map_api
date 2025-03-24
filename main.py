@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timedelta
 
 import fastapi
 from fastapi import FastAPI, Depends, HTTPException, status, Response
 from jose import jwt, JWTError
 from pydantic import Field, BaseModel, EmailStr
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, DatabaseError
 from sqlalchemy.orm import Session, Query
 from models import User, Location, get_db, Comment, Category
 from itsdangerous import URLSafeSerializer
@@ -13,6 +14,9 @@ import bcrypt
 from sqlalchemy import case
 from utils import create_reset_token, send_reset_email
 from config import settings
+import aioredis
+
+import export
 
 app = FastAPI()
 
@@ -27,8 +31,8 @@ def create_session(user_id: int) -> str:
 def get_session(session_token: str) -> dict:
     try:
         return serializer.loads(session_token)
-    except:
-        return None
+    except DatabaseError:
+        return {}
 
 
 class ResetPasswordRequest(BaseModel):
@@ -38,6 +42,33 @@ class ResetPasswordRequest(BaseModel):
 class NewPasswordRequest(BaseModel):
     token: str
     new_password: str
+
+
+
+@app.on_event("startup")
+async def startup():
+    app.state.redis = await aioredis.from_url(
+        "redis://localhost:6379",
+        encoding="utf-8",
+        decode_responses=True
+    )
+
+@app.on_event("shutdown")
+async def shutdown():
+    await app.state.redis.close()
+
+@app.get("/check-redis")
+async def check_redis():
+    try:
+        pong = await app.state.redis.ping()
+        if pong:
+            return {"message": "Redis is up and running!"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+
+
 
 @app.post("/request-password-reset")
 async def request_password_reset(
@@ -71,7 +102,6 @@ async def reset_password(
         if not user or user.reset_token != request.token or user.reset_token_expiry < datetime.utcnow():
             raise HTTPException(status_code=400, detail="invalid or expired token")
 
-        # Оновлення пароля
         user.password = bcrypt.hashpw(request.new_password.encode(), bcrypt.gensalt()).decode()
         user.reset_token = None
         user.reset_token_expiry = None
@@ -121,9 +151,12 @@ async def login(
 
     session_token = create_session(user.id)
 
+    await app.state.redis.set(f"session:{session_token}", user.id, ex=86400)
+
     # кукііі
     response.set_cookie(key="session_token", value=session_token, httponly=True)
     return {"message": "login success"}
+
 
 @app.post("/logout")
 async def logout(response: Response):
@@ -135,8 +168,40 @@ async def logout(response: Response):
 
 
 
-@app.get("/all_locations")
+# @app.get("/all-locations")
+# async def all_locations(db: Session = Depends(get_db)):
+#     locations = db.query(
+#         Location.id,
+#         Location.name,
+#         case(
+#             (Location.comments > 0, Location.rating / Location.comments),
+#             else_=0
+#         ).label("rating"),
+#         Location.likes,
+#         Location.dislikes,
+#     ).all()
+#
+#     result = [
+#         {
+#             "id": loc.id,
+#             "name": loc.name,
+#             "rating": loc.rating,
+#             "likes": loc.likes,
+#             "dislikes": loc.dislikes,
+#         }
+#         for loc in locations
+#     ]
+#
+#     return {"locations": result}
+
+@app.get("/all-locations")
 async def all_locations(db: Session = Depends(get_db)):
+    redis_key = "all_locations"
+    cached_locations = await app.state.redis.get(redis_key)
+
+    if cached_locations:
+        return {"locations": json.loads(cached_locations)}
+
     locations = db.query(
         Location.id,
         Location.name,
@@ -159,10 +224,12 @@ async def all_locations(db: Session = Depends(get_db)):
         for loc in locations
     ]
 
+    await app.state.redis.set(redis_key, json.dumps(result), ex=3600)
+
     return {"locations": result}
 
 
-@app.post("/add_location")
+@app.post("/add-location")
 async def add_location(
     name: str,
     about: str,
@@ -180,7 +247,7 @@ async def add_location(
         db.rollback()
         return {"error": "location already exists"}
 
-@app.post("/add_review")
+@app.post("/add-review")
 def add_review(
         searched_location: str,
         author: str,
@@ -220,7 +287,7 @@ def add_review(
 
         return {"error": "this location does not exist"}
 
-@app.post("/add_category")
+@app.post("/add-category")
 def add_category(
         searched_location: str,
         category_name: str,
@@ -245,7 +312,7 @@ def add_category(
         return {"error": "this location does not exist"}
 
 
-@app.get("/read_all_comments")
+@app.get("/read-all-comments")
 def read_all_comments(
         searched_location: str,
         db: Session = Depends(get_db)
@@ -256,21 +323,42 @@ def read_all_comments(
     return {"all comments": all_comments}
 
 
-@app.get("/search_location")
-def search_location(
+@app.get("/search-location")
+async def search_location(
         search_query: str,
-
-        db : Session = Depends(get_db)
+        db: Session = Depends(get_db)
 ):
+    redis_key = f"search_location:{search_query}"
+
+    cached_result = await app.state.redis.get(redis_key)
+    if cached_result:
+        return {"found location": json.loads(cached_result)}
+
     found_location = db.query(Location).filter(
         (Location.name.ilike(f"%{search_query}%")) |
         (Location.about.ilike(f"%{search_query}%"))
     ).first()
 
-    return {"found location": found_location}
+    if found_location:
+        location_dict = {
+            "id": found_location.id,
+            "name": found_location.name,
+            "about": found_location.about,
+            "rating": found_location.rating,
+            "likes": found_location.likes,
+            "dislikes": found_location.dislikes
+        }
+
+        await app.state.redis.set(redis_key, json.dumps(location_dict), ex=600)
+
+        return {"found location": location_dict}
 
 
-@app.put("edit_location_about")
+    return {"message": "Location not found"}
+
+
+
+@app.put("edit-location-about")
 def edit_location_about(
         searched_location: str,
         new_about: str,
@@ -283,7 +371,7 @@ def edit_location_about(
     return {"location edited": location}
 
 
-@app.delete("/delete_location")
+@app.delete("/delete-location")
 def search_location(
         location_to_delete: str,
 
@@ -299,7 +387,7 @@ def search_location(
         return {"error": f"there is no object named '{location_to_delete}' in db"}
 
 
-@app.get("/filter_by_rating")
+@app.get("/filter-by-rating")
 def filter_by_rating(
         db: Session = Depends(get_db)
 ):
@@ -307,7 +395,7 @@ def filter_by_rating(
     return {"sorted locations": [loc.name for loc in sorted_locations]}
 
 
-@app.get("/filter_by_category")
+@app.get("/filter-by-category")
 def filter_by_category(
         category: str,
 
@@ -319,7 +407,10 @@ def filter_by_category(
     return {"sorted locations": [loc.name for loc in sorted_locations]}
 
 
+@app.get("/dump-to-json")
+def export():
+    export.export_to_json()
 
-
+    return {"message": "locations data imported successfully"}
 
 
