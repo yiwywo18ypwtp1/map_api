@@ -135,30 +135,6 @@ async def reset_password(
 
 
 
-
-# @app.post("/signup")
-# async def signup(
-#     username: str,
-#     email: str,
-#     password: str,
-#     role: str,
-#     db: Session = Depends(get_db),
-# ):
-#     existing_user = db.query(User).filter(User.username == username).first()
-#     if existing_user:
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="user already exists",
-#         )
-#
-#     hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-#
-#     new_user = User(username=username, password=hashed_password, email=email, role=role)
-#     db.add(new_user)
-#     db.commit()
-#
-#     return {"message": "user registred succses", "username": username, "email": email, "role": role}
-
 @app.post("/signup")
 async def signup(
     username: str,
@@ -227,6 +203,7 @@ async def all_locations(
             ).label("rating"),
             Location.likes,
             Location.dislikes,
+            Location.owner_id,
             Location.is_aproved
         ).filter(Location.is_aproved==True).all()
 
@@ -237,6 +214,7 @@ async def all_locations(
                 "rating": loc.rating,
                 "likes": loc.likes,
                 "dislikes": loc.dislikes,
+                "owner": loc.owner_id,
                 "is_aproved": loc.is_aproved,
             }
             for loc in locations
@@ -249,7 +227,7 @@ async def all_locations(
 
 
 
-@app.post("/locations")
+@app.post("/locations/new")
 async def add_location(
     name: str,
     about: str,
@@ -262,6 +240,7 @@ async def add_location(
         new_location = Location(
             name=name,
             about=about,
+            owner_id=user.id,
             is_aproved=is_approved
         )
 
