@@ -5,16 +5,28 @@
         "about": "lalala",
         "like_amount": 2,
         "dislike_amount": 1,
-        "comments_amountrating": 13.0,
+        "comments_amount": 2,
+        "rating": 13.0,
         "is_aproved": null
     },
     {
-        "id": 3,
-        "name": "Melitopol",
-        "about": "ya tam naroduvsya",
+        "id": 4,
+        "name": "Melitipol",
+        "about": "ya tyt naroduvsya",
         "like_amount": 0,
         "dislike_amount": 0,
-        "comments_amountrating": 0.0,
-        "is_aproved": false
+        "comments_amount": 0,
+        "rating": 0.0,
+        "is_aproved": true
+    },
+    {
+        "id": 5,
+        "name": "Kyiv",
+        "about": "bolshoi city",
+        "like_amount": 0,
+        "dislike_amount": 0,
+        "comments_amount": 0,
+        "rating": 0.0,
+        "is_aproved": true
     }
 ]

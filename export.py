@@ -15,7 +15,7 @@ def generate_data(_data):
             'about': location.about,
             'like_amount': location.likes,
             'dislike_amount': location.dislikes,
-            'comments_amount'
+            'comments_amount': location.comments,
             'rating': location.rating,
             'is_aproved': location.is_aproved,
         }

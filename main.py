@@ -432,7 +432,7 @@ def filter_by_category(
     return {"sorted locations": [loc.name for loc in sorted_locations]}
 
 
-@app.get("locations/dump-to-json")
+@app.get("/locations/dump-to-json")
 def export():
     export.export_to_json()
 
