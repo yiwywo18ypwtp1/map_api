@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta
 
 import fastapi
-from fastapi import FastAPI, Depends, HTTPException, status, Response, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Response, Request, Query
 from jose import jwt, JWTError
 from pydantic import Field, BaseModel, EmailStr
 from sqlalchemy.exc import IntegrityError, DatabaseError, NoResultFound
@@ -189,7 +189,7 @@ async def logout(response: Response):
 
 
 
-@app.get("/locations/read-all")
+@app.get("/locations/all")
 async def all_locations(
         db: Session = Depends(get_db)
 ):
@@ -255,7 +255,7 @@ async def add_location(
         return {"error": "location already exists"}
 
 
-@app.post("/locations/reviews/{location_name}")
+@app.post("/locations/{location_name}/reviews")
 def add_review(
         location_name: str,
         author: str,
@@ -295,7 +295,7 @@ def add_review(
 
         return {"error": "this location does not exist"}
 
-@app.post("/locations/categories}/{location_name}")
+@app.post("/locations/{location_name}/categories")
 def add_category(
         location_name: str,
         category_name: str,
@@ -320,7 +320,7 @@ def add_category(
         return {"error": "this location does not exist"}
 
 
-@app.get("/locations/reviews/read-all/{location_name}")
+@app.get("/locations/{location_name}/reviews")
 def read_all_comments(
         location_name: str,
         db: Session = Depends(get_db)
@@ -331,9 +331,9 @@ def read_all_comments(
     return {"all comments": all_comments}
 
 
-@app.get("/locations/search/{query}")
+@app.get("/locations/search")
 async def search_location(
-        query: str,
+        query: str = fastapi.Query(None),
         db: Session = Depends(get_db)
 ):
     redis_key = f"search_location:{query}"
@@ -387,8 +387,8 @@ def edit_location_about(
         return {"location edited": location}
 
 
-@app.delete("/locations/delete/{location_name}")
-def search_location(
+@app.delete("/locations/{location_name}")
+def delete_location(
         location_name: str,
 
         user: User = Depends(get_current_user),
@@ -440,8 +440,11 @@ def export():
 
 
 
-@app.get("/locations/locations-to-aprove")
-async def locations_to_aprove(db: Session = Depends(get_db)):
+@app.get("moderation/locations")
+async def locations_to_aprove(
+        approved: bool = Query(False),
+        db: Session = Depends(get_db)
+):
     try:
         locations = db.query(
             Location.id,
@@ -453,7 +456,7 @@ async def locations_to_aprove(db: Session = Depends(get_db)):
             Location.likes,
             Location.dislikes,
             Location.is_aproved
-        ).filter(Location.is_aproved==False).all()
+        ).filter(Location.is_aproved==approved).all()
 
         result = [
             {
@@ -472,7 +475,7 @@ async def locations_to_aprove(db: Session = Depends(get_db)):
         return {"message": "there are no locations in the db"}
 
 
-@app.post("/approve_location/{location_name}")
+@app.post("/moderation/{location_name}/approve")
 def approve_location(
         location_name: str,
         user: User = Depends(get_current_user),
