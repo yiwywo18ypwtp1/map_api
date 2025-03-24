@@ -17,6 +17,7 @@ def generate_data(_data):
             'dislike_amount': location.dislikes,
             'comments_amount'
             'rating': location.rating,
+            'is_aproved': location.is_aproved,
         }
         json_data.append(loc)
     return json_data

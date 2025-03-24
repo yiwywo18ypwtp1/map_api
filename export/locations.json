@@ -3,16 +3,18 @@
         "id": 1,
         "name": "Lviv",
         "about": "lalala",
-        "like_amount": 0,
-        "dislike_amount": 0,
-        "comments_amountrating": 0.0
+        "like_amount": 2,
+        "dislike_amount": 1,
+        "comments_amountrating": 13.0,
+        "is_aproved": null
     },
     {
-        "id": 2,
-        "name": "Kyiv",
-        "about": "Київ - столиця України, розташована на річці Дніпро. Місто відоме пам'ятками релігійної архітектури та історичними музеями. Києво-Печерська лавра XI століття - це монастир і центр паломництва. На його території височіють кілька церков, увінчаних золотими куполами. Цей архітектурний комплекс знаменитий своїми підземними ходами, що ведуть в усипальниці православних ченців, і колекцією золотих предметів скіфських часів. ",
+        "id": 3,
+        "name": "Melitopol",
+        "about": "ya tam naroduvsya",
         "like_amount": 0,
         "dislike_amount": 0,
-        "comments_amountrating": 0.0
+        "comments_amountrating": 0.0,
+        "is_aproved": false
     }
 ]

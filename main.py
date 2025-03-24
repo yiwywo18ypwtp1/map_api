@@ -2,11 +2,13 @@ import json
 from datetime import datetime, timedelta
 
 import fastapi
-from fastapi import FastAPI, Depends, HTTPException, status, Response
+from fastapi import FastAPI, Depends, HTTPException, status, Response, Request
 from jose import jwt, JWTError
 from pydantic import Field, BaseModel, EmailStr
-from sqlalchemy.exc import IntegrityError, DatabaseError
+from sqlalchemy.exc import IntegrityError, DatabaseError, NoResultFound
 from sqlalchemy.orm import Session, Query
+from sqlalchemy.types import Boolean
+
 from models import User, Location, get_db, Comment, Category
 from itsdangerous import URLSafeSerializer
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -43,6 +45,23 @@ class NewPasswordRequest(BaseModel):
     token: str
     new_password: str
 
+async def get_user_id_from_session(request: Request) -> int:
+    session_token = request.cookies.get("session_token")
+    if not session_token:
+        raise HTTPException(status_code=401, detail="User not authenticated")
+
+    user_id = await app.state.redis.get(f"session:{session_token}")
+
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid session token")
+
+    return int(user_id)
+
+def get_current_user(db: Session = Depends(get_db), user_id: int = Depends(get_user_id_from_session)) -> User:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
 @app.on_event("startup")
@@ -57,7 +76,12 @@ async def startup():
 async def shutdown():
     await app.state.redis.close()
 
-@app.get("/check-redis")
+
+@app.get("/hello")
+def hello(current_user: User = Depends(get_current_user)):
+    return {"message": f"Hello, {current_user.username}!"}
+
+@app.get("/redis-status")
 async def check_redis():
     try:
         pong = await app.state.redis.ping()
@@ -68,9 +92,7 @@ async def check_redis():
 
 
 
-
-
-@app.post("/request-password-reset")
+@app.post("/password-reset/request")
 async def request_password_reset(
     request: ResetPasswordRequest,
     db: Session = Depends(get_db)
@@ -87,7 +109,7 @@ async def request_password_reset(
     await send_reset_email(request.email, reset_token)
     return {"message": "email to reset was sent"}
 
-@app.post("/reset-password")
+@app.post("/password-reset")
 async def reset_password(
     request: NewPasswordRequest,
     db: Session = Depends(get_db)
@@ -114,113 +136,149 @@ async def reset_password(
 
 
 
+# @app.post("/signup")
+# async def signup(
+#     username: str,
+#     email: str,
+#     password: str,
+#     role: str,
+#     db: Session = Depends(get_db),
+# ):
+#     existing_user = db.query(User).filter(User.username == username).first()
+#     if existing_user:
+#         raise HTTPException(
+#             status_code=status.HTTP_400_BAD_REQUEST,
+#             detail="user already exists",
+#         )
+#
+#     hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+#
+#     new_user = User(username=username, password=hashed_password, email=email, role=role)
+#     db.add(new_user)
+#     db.commit()
+#
+#     return {"message": "user registred succses", "username": username, "email": email, "role": role}
+
 @app.post("/signup")
 async def signup(
     username: str,
     email: str,
     password: str,
+    role: str,
     db: Session = Depends(get_db),
 ):
     existing_user = db.query(User).filter(User.username == username).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="user already exists",
+            detail="User already exists",
         )
 
     hashed_password = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-    new_user = User(username=username, password=hashed_password, email=email)
+    new_user = User(username=username, password=hashed_password, email=email, role=role)
     db.add(new_user)
     db.commit()
 
-    return {"message": "user registred succses", "username": username, "email": email}
+    return {"message": "User registered successfully", "username": username, "email": email, "role": role}
+
 
 @app.post("/login")
 async def login(
-    credentials: HTTPBasicCredentials = Depends(HTTPBasic()),
-    db: Session = Depends(get_db),
-    response: Response = None,
+        credentials: HTTPBasicCredentials = Depends(HTTPBasic()),
+        db: Session = Depends(get_db),
+        response: Response = None,
 ):
     user = db.query(User).filter(User.username == credentials.username).first()
     if not user or not bcrypt.checkpw(credentials.password.encode(), user.password.encode()):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="invalid username or password",
+            detail="Invalid username or password",
         )
 
     session_token = create_session(user.id)
 
     await app.state.redis.set(f"session:{session_token}", user.id, ex=86400)
 
-    # кукііі
+    # кукі
     response.set_cookie(key="session_token", value=session_token, httponly=True)
-    return {"message": "login success"}
+
+    return {"message": "Login success", "username": user.username, "role": user.role}
 
 
 @app.post("/logout")
 async def logout(response: Response):
-    # Видалення cookies
     response.delete_cookie(key="session_token")
-    return {"message": "logout success"}
+    return {"message": "Logout success"}
 
 
-@app.get("/all-locations")
-async def all_locations(db: Session = Depends(get_db)):
-    redis_key = "all_locations"
-    cached_locations = await app.state.redis.get(redis_key)
 
-    if cached_locations:
-        return {"locations": json.loads(cached_locations)}
+@app.get("/locations/read-all")
+async def all_locations(
+        db: Session = Depends(get_db)
+):
+    try:
+        locations = db.query(
+            Location.id,
+            Location.name,
+            case(
+                (Location.comments > 0, Location.rating / Location.comments),
+                else_=0
+            ).label("rating"),
+            Location.likes,
+            Location.dislikes,
+            Location.is_aproved
+        ).filter(Location.is_aproved==True).all()
 
-    locations = db.query(
-        Location.id,
-        Location.name,
-        case(
-            (Location.comments > 0, Location.rating / Location.comments),
-            else_=0
-        ).label("rating"),
-        Location.likes,
-        Location.dislikes,
-    ).all()
+        result = [
+            {
+                "id": loc.id,
+                "name": loc.name,
+                "rating": loc.rating,
+                "likes": loc.likes,
+                "dislikes": loc.dislikes,
+                "is_aproved": loc.is_aproved,
+            }
+            for loc in locations
+        ]
+        return {"approved locations:": result}
 
-    result = [
-        {
-            "id": loc.id,
-            "name": loc.name,
-            "rating": loc.rating,
-            "likes": loc.likes,
-            "dislikes": loc.dislikes,
-        }
-        for loc in locations
-    ]
-
-    await app.state.redis.set(redis_key, json.dumps(result), ex=3600)
-
-    return {"locations": result}
+    except NoResultFound:
+        return {"message": "there are no locations in the db"}
 
 
-@app.post("/add-location")
+
+
+@app.post("/locations")
 async def add_location(
     name: str,
     about: str,
+
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    is_approved = True if user.role == "admin" else False
     try:
         new_location = Location(
             name=name,
             about=about,
+            is_aproved=is_approved
         )
+
         db.add(new_location)
         db.commit()
-        return {"loc added": str(new_location)}
+        if is_approved:
+            return {"message": f"location {new_location.name} has been added"}
+        else:
+            return {"message": f"location {new_location.name} has been sent for moderation"}
     except IntegrityError as ex:
         db.rollback()
         return {"error": "location already exists"}
 
-@app.post("/add-review")
+
+@app.post("/locations/reviews/{location_name}")
 def add_review(
-        searched_location: str,
+        location_name: str,
         author: str,
         text: str,
         like: bool, dislike: bool,
@@ -228,10 +286,10 @@ def add_review(
 
         db: Session = Depends(get_db)
 ):
-    location = db.query(Location).filter(Location.name == searched_location).first()
+    location = db.query(Location).filter(Location.name == location_name).first()
 
     if not location:
-        raise HTTPException(status_code=404, detail="Location not found")
+        raise HTTPException(status_code=404, detail="location not found")
 
     try:
         new_comment = Comment(
@@ -258,14 +316,14 @@ def add_review(
 
         return {"error": "this location does not exist"}
 
-@app.post("/add-category")
+@app.post("/locations/categories}/{location_name}")
 def add_category(
-        searched_location: str,
+        location_name: str,
         category_name: str,
 
         db: Session = Depends(get_db)
 ):
-    location = db.query(Location).filter(Location.name == searched_location).first()
+    location = db.query(Location).filter(Location.name == location_name).first()
 
     try:
         new_category = Category(
@@ -283,31 +341,31 @@ def add_category(
         return {"error": "this location does not exist"}
 
 
-@app.get("/read-all-comments")
+@app.get("/locations/reviews/read-all/{location_name}")
 def read_all_comments(
-        searched_location: str,
+        location_name: str,
         db: Session = Depends(get_db)
 ):
-    location = db.query(Location).filter(Location.name == searched_location).first()
+    location = db.query(Location).filter(Location.name == location_name).first()
     all_comments = db.query(Comment).filter(Comment.loc_id == location.id).all()
 
     return {"all comments": all_comments}
 
 
-@app.get("/search-location")
+@app.get("/locations/search/{query}")
 async def search_location(
-        search_query: str,
+        query: str,
         db: Session = Depends(get_db)
 ):
-    redis_key = f"search_location:{search_query}"
+    redis_key = f"search_location:{query}"
 
     cached_result = await app.state.redis.get(redis_key)
     if cached_result:
         return {"found location": json.loads(cached_result)}
 
     found_location = db.query(Location).filter(
-        (Location.name.ilike(f"%{search_query}%")) |
-        (Location.about.ilike(f"%{search_query}%"))
+        (Location.name.ilike(f"%{query}%")) |
+        (Location.about.ilike(f"%{query}%"))
     ).first()
 
     if found_location:
@@ -329,36 +387,53 @@ async def search_location(
 
 
 
-@app.put("edit-location-about")
+@app.put("/locations/edit-about/{location_name}")
 def edit_location_about(
-        searched_location: str,
+        location_name: str,
         new_about: str,
 
+        user = Depends(get_current_user),
         db: Session = Depends(get_db)
 ):
-    location = db.query(Location).filter(Location.name == searched_location).first()
-    location.about = new_about
+    location = db.query(Location).filter(Location.name == location_name).first()
 
-    return {"location edited": location}
+    if user.role != "admin":
+        if location.owner_id == user.id:
+            location.about = new_about
+            return {"location edited": location}
+        else:
+            return {"message": "u have no permissions to edit this location. it isn't yours"}
+    else:
+        location.about = new_about
+        return {"location edited": location}
 
 
-@app.delete("/delete-location")
+@app.delete("/locations/delete/{location_name}")
 def search_location(
-        location_to_delete: str,
+        location_name: str,
 
+        user: User = Depends(get_current_user),
         db : Session = Depends(get_db)
 ):
-    all_locations = db.query(Location).all()
+    location = db.query(Location).filter(Location.name == location_name).first()
 
-    if location_to_delete in all_locations:
-        db.query(Location).filter(Location.name == location_to_delete).delete()
-        db.commit()
-        return {"message": f"user '{location_to_delete}' has deleted from db"}
-    else:
-        return {"error": f"there is no object named '{location_to_delete}' in db"}
+    try:
+        if user.role != "admin":
+            if location.owner_id == user.id:
+                db.query(Location).filter(Location.name == location_name).delete()
+                db.commit()
+                return {"message": f"location '{location_name}' has deleted from db"}
+            else:
+                return {"message": "u have no permissions to delete this location"}
+        else:
+            db.query(Location).filter(Location.name == location_name).delete()
+            db.commit()
+            return {"message": f"location '{location_name}' has deleted from db"}
+    except IntegrityError as ex:
+        return {"error": f"there is no object named '{location_name}' in db"}
 
 
-@app.get("/filter-by-rating")
+@app.get("/locations/filter-by-rating")
 def filter_by_rating(
         db: Session = Depends(get_db)
 ):
@@ -366,7 +441,7 @@ def filter_by_rating(
     return {"sorted locations": [loc.name for loc in sorted_locations]}
 
 
-@app.get("/filter-by-category")
+@app.get("/locations/filter-by-category")
 def filter_by_category(
         category: str,
 
@@ -378,10 +453,62 @@ def filter_by_category(
     return {"sorted locations": [loc.name for loc in sorted_locations]}
 
 
-@app.get("/dump-to-json")
+@app.get("locations/dump-to-json")
 def export():
     export.export_to_json()
 
     return {"message": "locations data imported successfully"}
 
 
+
+@app.get("/locations/locations-to-aprove")
+async def locations_to_aprove(db: Session = Depends(get_db)):
+    try:
+        locations = db.query(
+            Location.id,
+            Location.name,
+            case(
+                (Location.comments > 0, Location.rating / Location.comments),
+                else_=0
+            ).label("rating"),
+            Location.likes,
+            Location.dislikes,
+            Location.is_aproved
+        ).filter(Location.is_aproved==False).all()
+
+        result = [
+            {
+                "id": loc.id,
+                "name": loc.name,
+                "rating": loc.rating,
+                "likes": loc.likes,
+                "dislikes": loc.dislikes,
+                "is_aproved": loc.is_aproved,
+            }
+            for loc in locations
+        ]
+        return {"unapproved locations:": result}
+
+    except NoResultFound:
+        return {"message": "there are no locations in the db"}
+
+
+@app.post("/approve_location/{location_name}")
+def approve_location(
+        location_name: str,
+        user: User = Depends(get_current_user),
+        db: Session = Depends(get_db)
+):
+    if user.role != "moderator":
+        raise HTTPException(status_code=403, detail="u dont have permission to this action")
+
+
+    location = db.query(Location).filter(Location.name == location_name).first()
+
+    if not location:
+        raise HTTPException(status_code=404, detail="location not found")
+
+    location.is_aproved = True
+    db.commit()
+
+    return {"message": f"location {location.name} has been approved!"}

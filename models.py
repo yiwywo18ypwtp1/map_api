@@ -22,6 +22,8 @@ class User(Base):
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(DateTime, nullable=True)
 
+    role = Column(String, default='user', nullable=True)
+
 class Location(Base):
     __tablename__ = 'locations'
     id = Column(Integer, primary_key=True)
@@ -32,6 +34,9 @@ class Location(Base):
     rating = Column(Float, default=0)
     comments = Column(Integer, default=0)
 
+    owner_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_aproved = Column(Boolean, default=False)
+
     def __str__(self):
         return f'{self.name}: "{self.about}, rating: {self.rating}"'
 
@@ -41,6 +46,9 @@ class Comment(Base):
     loc_id = Column(Integer, ForeignKey("locations.id"))
     author = Column(String(255), nullable=False)
     text = Column(String(255), nullable=False)
+
+    owner_id = Column(Integer, ForeignKey('users.id'), nullable=True)
+    is_aproved = Column(Boolean, default=False)
 
     def __str__(self):
         return f'{self.author}: "{self.text}"'
